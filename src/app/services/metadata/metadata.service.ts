@@ -112,11 +112,14 @@ export class MetadataService {
         try {
             this.trackRepository.updateRating(track.id, track.rating);
 
-            if (this.settings.saveRatingToAudioFiles && this.fileAccess.getFileExtension(track.path).toLowerCase() === FileFormats.mp3) {
-                const fileMetaData: IFileMetadata = await this.fileMetadataFactory.createAsync(track.path);
-                fileMetaData.rating = track.rating;
-                fileMetaData.save();
-                this.logger.info(`Saved rating to file '${track.path}'`, 'MetadataService', 'saveTrackRating');
+            if (this.settings.saveRatingToAudioFiles) {
+                const fileExtension = this.fileAccess.getFileExtension(track.path).toLowerCase();
+                if (fileExtension === FileFormats.mp3 || fileExtension === FileFormats.flac) {
+                    const fileMetaData: IFileMetadata = await this.fileMetadataFactory.createAsync(track.path);
+                    fileMetaData.rating = track.rating;
+                    fileMetaData.save();
+                    this.logger.info(`Saved rating to file '${track.path}'`, 'MetadataService', 'saveTrackRating');
+                }
             }
 
             // Backup the rating to a separate file

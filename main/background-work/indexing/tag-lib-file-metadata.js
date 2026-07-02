@@ -165,20 +165,36 @@ class TagLibFileMetadata {
     }
 
     #readRatingFromFile(tagLibFile) {
-        const id3v2Tag = tagLibFile.getTag(TagTypes.Id3v2, true);
-        const allPopularimeterFrames = id3v2Tag.getFramesByClassType(Id3v2FrameClassType.PopularimeterFrame);
+        // Try to read from ID3v2 tag first (MP3 format)
+        const id3v2Tag = tagLibFile.getTag(TagTypes.Id3v2, false);
+        if (id3v2Tag !== undefined) {
+            const allPopularimeterFrames = id3v2Tag.getFramesByClassType(Id3v2FrameClassType.PopularimeterFrame);
 
-        if (allPopularimeterFrames.length === 0) {
-            return 0;
+            if (allPopularimeterFrames.length > 0) {
+                const popularimeterFramesForWindowsUser = allPopularimeterFrames.filter((x) => x.user === this.#windowsPopMUser);
+
+                if (popularimeterFramesForWindowsUser.length > 0) {
+                    return RatingConverter.popMToStarRating(popularimeterFramesForWindowsUser[0].rating);
+                }
+
+                return RatingConverter.popMToStarRating(allPopularimeterFrames[0].rating);
+            }
         }
 
-        const popularimeterFramesForWindowsUser = allPopularimeterFrames.filter((x) => x.user === this.#windowsPopMUser);
-
-        if (popularimeterFramesForWindowsUser.length > 0) {
-            return RatingConverter.popMToStarRating(popularimeterFramesForWindowsUser[0].rating);
+        // Try to read from Vorbis comments (FLAC format)
+        const vorbisTag = tagLibFile.getTag(TagTypes.VorbisComment, false);
+        if (vorbisTag !== undefined) {
+            const ratingValues = vorbisTag.getField('RATING');
+            if (ratingValues && ratingValues.length > 0) {
+                const ratingValue = parseInt(ratingValues[0], 10);
+                if (!isNaN(ratingValue)) {
+                    // Vorbis RATING field stores the value as 0-5 stars or 0-10 half-stars
+                    return ratingValue;
+                }
+            }
         }
 
-        return RatingConverter.popMToStarRating(allPopularimeterFrames[0].rating);
+        return 0;
     }
 }
 

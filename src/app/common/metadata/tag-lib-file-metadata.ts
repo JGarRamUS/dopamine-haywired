@@ -8,6 +8,7 @@ import {
     MpegAudioFileSettings,
     PictureType,
     TagTypes,
+    VorbisComment,
 } from '@digimezzo/node-taglib-sharp';
 import { IFileMetadata } from './i-file-metadata';
 import { RatingConverter } from './rating-converter';
@@ -247,22 +248,48 @@ export class TagLibFileMetadata implements IFileMetadata {
     }
 
     private readRatingFromFile(tagLibFile: File): number {
-        const id3v2Tag: Id3v2Tag = <Id3v2Tag>tagLibFile.getTag(TagTypes.Id3v2, true);
-        const allPopularimeterFrames: Id3v2PopularimeterFrame[] = id3v2Tag.getFramesByClassType<Id3v2PopularimeterFrame>(
-            Id3v2FrameClassType.PopularimeterFrame,
-        );
+        // Try to read from ID3v2 tag first (MP3 format)
+        const id3v2Tag: Id3v2Tag = <Id3v2Tag>tagLibFile.getTag(TagTypes.Id3v2, false);
+        if (id3v2Tag !== undefined) {
+            const allPopularimeterFrames: Id3v2PopularimeterFrame[] = id3v2Tag.getFramesByClassType<Id3v2PopularimeterFrame>(
+                Id3v2FrameClassType.PopularimeterFrame,
+            );
 
-        const preferredPopularimeterFrame: Id3v2PopularimeterFrame | undefined =
-            this.getPreferredPopularimeterFrame(allPopularimeterFrames);
+            const preferredPopularimeterFrame: Id3v2PopularimeterFrame | undefined =
+                this.getPreferredPopularimeterFrame(allPopularimeterFrames);
 
-        if (preferredPopularimeterFrame === undefined) {
-            return 0;
+            if (preferredPopularimeterFrame !== undefined) {
+                return RatingConverter.popMToStarRating(preferredPopularimeterFrame.rating);
+            }
         }
 
-        return RatingConverter.popMToStarRating(preferredPopularimeterFrame.rating);
+        // Try to read from Vorbis comments (FLAC format)
+        const vorbisTag: VorbisComment = <VorbisComment>tagLibFile.getTag(TagTypes.VorbisComment, false);
+        if (vorbisTag !== undefined) {
+            const ratingValues: string[] = vorbisTag.getField('RATING');
+            if (ratingValues && ratingValues.length > 0) {
+                const ratingValue = parseInt(ratingValues[0], 10);
+                if (!isNaN(ratingValue)) {
+                    // Vorbis RATING field stores the value as 0-5 stars or 0-10 half-stars
+                    return ratingValue;
+                }
+            }
+        }
+
+        return 0;
     }
 
     private writeRatingToFile(tagLibFile: File, rating: number): void {
+        if (this.path.toLowerCase().endsWith('.flac')) {
+            // Write to Vorbis comment for FLAC files
+            this.writeRatingToVorbisComment(tagLibFile, rating);
+        } else {
+            // Write to ID3v2 tag for MP3 and other formats
+            this.writeRatingToId3v2Tag(tagLibFile, rating);
+        }
+    }
+
+    private writeRatingToId3v2Tag(tagLibFile: File, rating: number): void {
         const id3v2Tag: Id3v2Tag = <Id3v2Tag>tagLibFile.getTag(TagTypes.Id3v2, true);
         let allPopularimeterFrames: Id3v2PopularimeterFrame[] = id3v2Tag.getFramesByClassType<Id3v2PopularimeterFrame>(
             Id3v2FrameClassType.PopularimeterFrame,
@@ -280,6 +307,18 @@ export class TagLibFileMetadata implements IFileMetadata {
 
         if (preferredPopularimeterFrame !== undefined) {
             preferredPopularimeterFrame.rating = RatingConverter.starToPopMRating(rating);
+        }
+    }
+
+    private writeRatingToVorbisComment(tagLibFile: File, rating: number): void {
+        const vorbisTag: VorbisComment = <VorbisComment>tagLibFile.getTag(TagTypes.VorbisComment, true);
+
+        if (rating === 0) {
+            // Remove the rating field if rating is 0
+            vorbisTag.removeAllFields('RATING');
+        } else {
+            // Set the rating field (1-10, where odd numbers are half-stars)
+            vorbisTag.setField('RATING', rating.toString());
         }
     }
 
